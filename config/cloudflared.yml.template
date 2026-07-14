@@ -1,0 +1,10 @@
+# Cloudflare Named Tunnel 配置
+# 由 setup-cloudflare-tunnel.sh 自动生成，请勿手改 tunnel/credentials-file
+
+tunnel: REPLACE_TUNNEL_ID
+credentials-file: REPLACE_CREDENTIALS_FILE
+
+ingress:
+  - hostname: REPLACE_HOSTNAME
+    service: http://127.0.0.1:8787
+  - service: http_status:404

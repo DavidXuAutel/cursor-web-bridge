@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+bin/cloudflared
+.DS_Store
+*.log
+logs/
+public_url.txt
+tunnel.log
+.cursor_api_key
+config/cloudflared.yml

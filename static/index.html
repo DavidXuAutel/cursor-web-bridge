@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cursor Web Bridge</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <div class="logo">⌘</div>
+        <div>
+          <h1>Cursor Web Bridge</h1>
+          <p>通过网页连接本机 Cursor 本地 Agent API</p>
+        </div>
+      </div>
+      <div class="status-bar" id="statusBar">
+        <span class="dot" id="bridgeDot"></span>
+        <span id="bridgeStatus">检测中...</span>
+        <span class="sep">|</span>
+        <span class="dot" id="cursorDot"></span>
+        <span id="cursorStatus">Cursor IDE</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="chat-panel">
+        <div class="panel-header">
+          <h2>对话</h2>
+          <button id="newSessionBtn" class="btn secondary">新会话</button>
+        </div>
+        <div id="messages" class="messages"></div>
+        <form id="chatForm" class="chat-form">
+          <textarea id="messageInput" rows="3" placeholder="输入消息，连接本机 Cursor Agent..."></textarea>
+          <div class="form-actions">
+            <select id="modelSelect"></select>
+            <button type="submit" class="btn primary" id="sendBtn">发送</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="sidebar">
+        <section class="card">
+          <h3>连接设置</h3>
+          <label>
+            Bridge API Key
+            <input type="password" id="bridgeKeyInput" placeholder="公网访问鉴权密钥" />
+          </label>
+          <label>
+            Cursor API Key
+            <input type="password" id="cursorKeyInput" placeholder="cursor_..." />
+          </label>
+          <label>
+            工作目录
+            <input type="text" id="workspaceInput" placeholder="/Users/.../Projects" />
+          </label>
+          <button id="saveConfigBtn" class="btn primary full">保存并连接</button>
+        </section>
+
+        <section class="card">
+          <h3>API 端点</h3>
+          <div class="endpoint-list">
+            <div class="endpoint">
+              <code id="baseUrl">http://localhost:8787</code>
+              <button class="copy-btn" data-copy="baseUrl">复制</button>
+            </div>
+            <div class="endpoint" style="margin-top:8px">
+              <code id="wsUrl">ws://localhost:8787/ws</code>
+              <button class="copy-btn" data-copy="wsUrl">复制</button>
+            </div>
+            <ul>
+              <li><code>WS /ws</code> — WebSocket 实时对话</li>
+              <li><code>GET /api/status</code> — 连接状态</li>
+              <li><code>GET /api/models</code> — 模型列表</li>
+              <li><code>POST /api/chat</code> — SSE 对话</li>
+              <li><code>POST /api/v1/chat/completions</code> — OpenAI 兼容</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>公网映射</h3>
+          <p class="hint">运行 <code>./start.sh --tunnel</code> 启动 Cloudflare 快速隧道，公网 URL 会打印在终端。</p>
+          <div id="tunnelInfo" class="tunnel-info hidden">
+            <span>公网地址：</span>
+            <code id="tunnelUrl"></code>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>
