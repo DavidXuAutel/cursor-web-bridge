@@ -2,12 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>Cursor Web Bridge</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=9" />
 </head>
 <body>
-  <div class="app">
+  <div class="app" data-mobile-tab="chat">
     <header class="header">
       <div class="brand">
         <div class="logo">⌘</div>
@@ -25,8 +28,13 @@
       </div>
     </header>
 
+    <nav class="mobile-nav" aria-label="手机端导航">
+      <button type="button" class="mobile-nav-btn active" data-tab="chat">对话</button>
+      <button type="button" class="mobile-nav-btn" data-tab="workspace">工作台</button>
+    </nav>
+
     <main class="main">
-      <section class="chat-panel">
+      <section class="chat-panel" data-panel="chat">
         <div class="panel-header">
           <h2>对话</h2>
           <button id="newSessionBtn" class="btn secondary">新会话</button>
@@ -41,7 +49,24 @@
         </form>
       </section>
 
-      <aside class="sidebar">
+      <aside class="sidebar" data-panel="workspace">
+        <section class="card">
+          <h3>当前 Workspace</h3>
+          <div id="workspacePanel" class="ide-panel">
+            <div class="muted">加载中...</div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-title-row">
+            <h3>Agent 界面</h3>
+            <button id="refreshIdeBtn" class="btn secondary small" type="button">刷新</button>
+          </div>
+          <div id="agentsPanel" class="agents-list">
+            <div class="muted">加载中...</div>
+          </div>
+        </section>
+
         <section class="card">
           <h3>连接设置</h3>
           <label>
@@ -72,17 +97,17 @@
             </div>
             <ul>
               <li><code>WS /ws</code> — WebSocket 实时对话</li>
+              <li><code>GET /api/workspace</code> — 当前 Workspace</li>
+              <li><code>GET /api/agents</code> — Agent 界面列表</li>
               <li><code>GET /api/status</code> — 连接状态</li>
-              <li><code>GET /api/models</code> — 模型列表</li>
               <li><code>POST /api/chat</code> — SSE 对话</li>
-              <li><code>POST /api/v1/chat/completions</code> — OpenAI 兼容</li>
             </ul>
           </div>
         </section>
 
         <section class="card">
           <h3>公网映射</h3>
-          <p class="hint">运行 <code>./start.sh --tunnel</code> 启动 Cloudflare 快速隧道，公网 URL 会打印在终端。</p>
+          <p class="hint">固定域名：<code>https://cursor.david-x.com</code></p>
           <div id="tunnelInfo" class="tunnel-info hidden">
             <span>公网地址：</span>
             <code id="tunnelUrl"></code>
@@ -91,6 +116,6 @@
       </aside>
     </main>
   </div>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>

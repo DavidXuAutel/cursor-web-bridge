@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
 };
 
 const els = {
+  app: document.querySelector(".app"),
   bridgeDot: document.getElementById("bridgeDot"),
   bridgeStatus: document.getElementById("bridgeStatus"),
   cursorDot: document.getElementById("cursorDot"),
@@ -21,7 +22,23 @@ const els = {
   saveConfigBtn: document.getElementById("saveConfigBtn"),
   baseUrl: document.getElementById("baseUrl"),
   wsUrl: document.getElementById("wsUrl"),
+  workspacePanel: document.getElementById("workspacePanel"),
+  agentsPanel: document.getElementById("agentsPanel"),
+  refreshIdeBtn: document.getElementById("refreshIdeBtn"),
 };
+
+function setMobileTab(tab) {
+  if (!els.app) return;
+  const next = tab === "workspace" ? "workspace" : "chat";
+  els.app.setAttribute("data-mobile-tab", next);
+  document.querySelectorAll(".mobile-nav-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-tab") === next);
+  });
+}
+
+document.querySelectorAll(".mobile-nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setMobileTab(btn.getAttribute("data-tab")));
+});
 
 let ws = null;
 let wsReady = false;
@@ -32,6 +49,23 @@ let chatInFlight = false;
 
 function bridgeKey() {
   return els.bridgeKeyInput.value.trim();
+}
+
+/** Reject truncated/placeholder tokens like "…" that poison localStorage. */
+function isValidBridgeToken(value) {
+  if (!value || typeof value !== "string") return false;
+  const t = value.trim();
+  if (!t) return false;
+  if (/[…⋯]/.test(t) || t.includes("...")) return false;
+  if (t.length < 16) return false;
+  return true;
+}
+
+function resolveBridgeKey(urlToken, stored, bootKey) {
+  for (const candidate of [urlToken, stored, bootKey]) {
+    if (isValidBridgeToken(candidate)) return candidate.trim();
+  }
+  return "";
 }
 
 function setSending(busy) {
@@ -70,23 +104,33 @@ function loadSettings() {
   const params = new URLSearchParams(window.location.search);
   const urlToken = params.get("token");
   const boot = window.__CWB_BOOT__ || {};
+  const stored = localStorage.getItem(STORAGE_KEYS.bridgeKey);
+  const resolved = resolveBridgeKey(urlToken, stored, boot.bridgeKey);
 
-  els.bridgeKeyInput.value =
-    urlToken ||
-    localStorage.getItem(STORAGE_KEYS.bridgeKey) ||
-    boot.bridgeKey ||
-    "";
+  // Clear poisoned localStorage (e.g. ellipsis from truncated share URLs)
+  if (stored && !isValidBridgeToken(stored)) {
+    localStorage.removeItem(STORAGE_KEYS.bridgeKey);
+  }
+
+  els.bridgeKeyInput.value = resolved;
   els.cursorKeyInput.value = localStorage.getItem(STORAGE_KEYS.cursorKey) || "";
   els.workspaceInput.value =
     localStorage.getItem(STORAGE_KEYS.workspace) || boot.workspace || "";
   els.baseUrl.textContent = window.location.origin;
   els.wsUrl.textContent = wsEndpoint();
 
-  if (urlToken || boot.bridgeKey) {
-    localStorage.setItem(STORAGE_KEYS.bridgeKey, bridgeKey());
+  if (resolved) {
+    localStorage.setItem(STORAGE_KEYS.bridgeKey, resolved);
   }
   if (boot.workspace && !localStorage.getItem(STORAGE_KEYS.workspace)) {
     localStorage.setItem(STORAGE_KEYS.workspace, boot.workspace);
+  }
+
+  // Drop bad ?token=… from address bar without reload
+  if (urlToken && !isValidBridgeToken(urlToken) && window.history.replaceState) {
+    params.delete("token");
+    const qs = params.toString();
+    window.history.replaceState({}, "", qs ? `?${qs}` : window.location.pathname);
   }
 }
 
@@ -309,7 +353,19 @@ async function api(path, options = {}) {
     headers: { ...authHeaders(), ...(options.headers || {}) },
   });
   if (!res.ok) {
-    const detail = await res.text();
+    const raw = await res.text();
+    let detail = raw;
+    try {
+      const body = JSON.parse(raw);
+      detail = body.detail || raw;
+    } catch {
+      /* keep raw */
+    }
+    if (res.status === 401) {
+      throw new Error(
+        detail || "授权失败：请检查 Bridge API Key，或用带完整 token 的链接打开"
+      );
+    }
     throw new Error(detail || `HTTP ${res.status}`);
   }
   return res;
@@ -446,7 +502,152 @@ loadSettings();
 connectWebSocket();
 refreshStatusHttp();
 loadModelsHttp();
+refreshIdePanels();
+if (els.refreshIdeBtn) {
+  els.refreshIdeBtn.addEventListener("click", refreshIdePanels);
+}
 setInterval(() => {
   if (wsReady) wsSend({ type: "ping" });
   else refreshStatusHttp();
 }, 15000);
+setInterval(refreshIdePanels, 20000);
+
+async function refreshIdePanels() {
+  await Promise.all([loadWorkspacePanel(), loadAgentsPanel()]);
+}
+
+async function loadWorkspacePanel() {
+  if (!els.workspacePanel) return;
+  try {
+    const res = await api("/api/workspace");
+    const data = await res.json();
+    const sel = data.selected_workspace || {};
+    const open = data.open_workspaces || [];
+    const openHtml = open.length
+      ? open
+          .map(
+            (w) =>
+              `<div class="meta">${w.live ? "●" : "○"} ${escapeHtml(
+                w.label || formatWorkspaceLabel(w.id, w.path)
+              )}${w.path ? ` — <code>${escapeHtml(w.path)}</code>` : ""}</div>`
+          )
+          .join("")
+      : `<div class="muted">无打开的 workspace</div>`;
+
+    els.workspacePanel.innerHTML = `
+      <div class="row"><div class="label">布局</div><div class="value">${escapeHtml(
+        data.layout || "unknown"
+      )}</div></div>
+      <div class="row"><div class="label">当前选中 Agent</div><div class="value">${escapeHtml(
+        sel.agent_name || sel.agent_id || "—"
+      )}</div></div>
+      <div class="row"><div class="label">Agent Workspace</div><div class="value">${escapeHtml(
+        formatWorkspaceLabel(sel.id, sel.path) || "—"
+      )}</div></div>
+      <div class="row"><div class="label">Bridge 工作目录</div><div class="value">${escapeHtml(
+        data.bridge_workspace || "—"
+      )}</div></div>
+      <div class="row"><div class="label">打开中</div>${openHtml}</div>
+    `;
+  } catch (err) {
+    els.workspacePanel.innerHTML = `<div class="muted">加载失败: ${escapeHtml(
+      err.message
+    )}</div>`;
+  }
+}
+
+async function loadAgentsPanel() {
+  if (!els.agentsPanel) return;
+  try {
+    const res = await api("/api/agents?limit=20");
+    const data = await res.json();
+    const agents = data.agents || [];
+    if (!agents.length) {
+      els.agentsPanel.innerHTML = `<div class="muted">暂无 Agent</div>`;
+      return;
+    }
+    els.agentsPanel.innerHTML = agents
+      .map((a) => {
+        const badges = [
+          a.selected ? `<span class="badge selected">当前</span>` : "",
+          `<span class="badge ${escapeHtml(a.ui_status || "idle")}">${escapeHtml(
+            a.ui_status || "idle"
+          )}</span>`,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const wsLabel =
+          a.workspace_label ||
+          formatWorkspaceLabel(a.workspace_id, a.workspace_path);
+        return `<button type="button" class="agent-item ${
+          a.selected ? "selected" : ""
+        }" data-agent-id="${escapeHtml(a.id)}" title="点击在网页中打开对话">
+          <div class="name"><span>${escapeHtml(a.name)}</span><span>${badges}</span></div>
+          <div class="subtitle">${escapeHtml(a.subtitle || "")}</div>
+          <div class="meta">${escapeHtml(wsLabel)}</div>
+        </button>`;
+      })
+      .join("");
+
+    els.agentsPanel.querySelectorAll("[data-agent-id]").forEach((el) => {
+      el.addEventListener("click", () => openAgent(el.getAttribute("data-agent-id")));
+    });
+  } catch (err) {
+    els.agentsPanel.innerHTML = `<div class="muted">加载失败: ${escapeHtml(
+      err.message
+    )}</div>`;
+  }
+}
+
+function formatWorkspaceLabel(id, path) {
+  if (path) {
+    const parts = String(path).split("/").filter(Boolean);
+    return parts[parts.length - 1] || path;
+  }
+  if (!id || id === "empty-window") return "空窗口";
+  return id;
+}
+
+async function openAgent(agentId) {
+  if (!agentId) return;
+  setMobileTab("chat");
+  appendMessage("system", `正在打开 Agent…`);
+  try {
+    const msgRes = await api(
+      `/api/agents/${encodeURIComponent(agentId)}/messages?limit=40`
+    );
+    const msgData = await msgRes.json();
+    const agent = msgData.agent || {};
+    const messages = msgData.messages || [];
+
+    els.messages.innerHTML = "";
+    appendMessage(
+      "system",
+      `已打开：${agent.name || agentId}  ·  ${formatWorkspaceLabel(
+        agent.workspace_id,
+        agent.workspace_path
+      )}`
+    );
+    if (!messages.length) {
+      appendMessage("system", "暂无本地 transcript 记录");
+    } else {
+      for (const m of messages) {
+        appendMessage(
+          m.role === "user" ? "user" : m.role === "system" ? "system" : "assistant",
+          m.content
+        );
+      }
+    }
+    refreshIdePanels();
+  } catch (err) {
+    appendMessage("system", `打开失败: ${err.message}`);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}

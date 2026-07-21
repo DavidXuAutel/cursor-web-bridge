@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,14 @@ from bridge import (
     shutdown_bridge,
     state,
     stream_chat,
+)
+import ide_store
+from cursor_ide import (
+    get_agent,
+    get_workspace_snapshot,
+    has_local_cursor,
+    list_agents,
+    read_agent_messages,
 )
 
 load_dotenv()
@@ -54,24 +62,28 @@ app.add_middleware(
 def verify_bridge_key(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None),
+    token: str | None = Query(default=None),
 ) -> None:
     required = state.bridge_api_key
     if not required:
         return
 
-    token = extract_token(authorization, x_api_key)
-    if token != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing bridge API key")
+    provided = extract_token(authorization, x_api_key, token)
+    if provided != required:
+        raise HTTPException(status_code=401, detail="授权失败：Bridge API Key 无效或缺失")
 
 
 def extract_token(
     authorization: str | None = None,
     x_api_key: str | None = None,
+    query_token: str | None = None,
 ) -> str | None:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
     if x_api_key:
         return x_api_key.strip()
+    if query_token:
+        return query_token.strip()
     return None
 
 async def iterate_stream_chat(message: str):
@@ -158,15 +170,99 @@ async def status(_: None = Depends(verify_bridge_key)) -> dict[str, Any]:
         except Exception as exc:
             state.last_error = str(exc)
 
+    ide_workspace = None
+    selected_agent = None
+    try:
+        snap = get_workspace_snapshot() if has_local_cursor() else ide_store.get_workspace()
+        ide_workspace = snap.get("selected_workspace")
+        selected_agent = {
+            "id": snap.get("selected_agent_id"),
+            "name": (snap.get("selected_workspace") or {}).get("agent_name"),
+            "workspace_path": (snap.get("selected_workspace") or {}).get("path"),
+        }
+    except Exception as exc:
+        state.last_error = str(exc)
+
     return {
         "bridge_connected": bridge_ok,
         "cursor_ide_running": cursor_ide_running(),
         "workspace": state.workspace,
+        "ide_workspace": ide_workspace,
+        "selected_agent": selected_agent,
         "default_model": state.default_model,
         "has_cursor_api_key": bool(state.cursor_api_key or os.environ.get("CURSOR_API_KEY")),
         "has_bridge_api_key": bool(state.bridge_api_key),
         "active_agent_id": state.active_agent_id,
         "last_error": state.last_error,
+    }
+
+
+@app.get("/api/workspace")
+async def workspace(_: None = Depends(verify_bridge_key)) -> dict[str, Any]:
+    try:
+        if has_local_cursor():
+            snap = get_workspace_snapshot()
+            snap["source"] = "local"
+        else:
+            snap = ide_store.get_workspace()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    snap["bridge_workspace"] = state.workspace
+    return snap
+
+
+@app.get("/api/agents")
+async def agents(
+    limit: int = 50,
+    detail: bool = False,
+    _: None = Depends(verify_bridge_key),
+) -> dict[str, Any]:
+    limit = max(1, min(limit, 200))
+    try:
+        if has_local_cursor():
+            return list_agents(limit=limit, detail=detail)
+        return ide_store.get_agents(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/agents/{agent_id}")
+async def agent_detail(
+    agent_id: str,
+    _: None = Depends(verify_bridge_key),
+) -> dict[str, Any]:
+    item = get_agent(agent_id) if has_local_cursor() else ide_store.get_agent(agent_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return item
+
+
+@app.get("/api/agents/{agent_id}/messages")
+async def agent_messages(
+    agent_id: str,
+    limit: int = 80,
+    _: None = Depends(verify_bridge_key),
+) -> dict[str, Any]:
+    limit = max(1, min(limit, 200))
+    if has_local_cursor():
+        data = read_agent_messages(agent_id, limit=limit)
+    else:
+        data = ide_store.get_messages(agent_id, limit=limit)
+    if data.get("error") == "agent not found":
+        raise HTTPException(status_code=404, detail="agent not found")
+    return data
+
+
+@app.post("/api/ide/snapshot")
+async def ide_snapshot_push(
+    payload: dict[str, Any],
+    _: None = Depends(verify_bridge_key),
+) -> dict[str, Any]:
+    snap = ide_store.set_snapshot(payload)
+    return {
+        "status": "ok",
+        "agents": len(snap.get("agents") or []),
+        "received_at": snap.get("received_at"),
     }
 
 
@@ -235,10 +331,13 @@ async def chat(
 
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket) -> None:
-    token = websocket.query_params.get("token")
-    if state.bridge_api_key and token != state.bridge_api_key:
-        await websocket.close(code=1008, reason="Unauthorized")
-        return
+    token = (websocket.query_params.get("token") or "").strip()
+    # Ellipsis / truncated share URLs must not pass
+    if state.bridge_api_key:
+        bad = (not token) or ("…" in token) or ("⋯" in token) or token == "..."
+        if bad or token != state.bridge_api_key:
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
 
     await websocket.accept()
     closed = False
