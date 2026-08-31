@@ -5,7 +5,13 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PYTHON="${PYTHON:-$HOME/miniconda3/bin/python3}"
+PYTHON="${PYTHON:-$ROOT/.venv/bin/python3}"
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="${HOME}/miniconda3/bin/python3"
+fi
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="$(command -v python3)"
+fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8787}"
 TUNNEL_MODE="${TUNNEL_MODE:-quick}"

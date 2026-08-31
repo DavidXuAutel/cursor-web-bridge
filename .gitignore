@@ -11,3 +11,4 @@ public_url.txt
 tunnel.log
 .cursor_api_key
 config/cloudflared.yml
+docs/local/

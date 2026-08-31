@@ -1,5 +1,6 @@
 # Cloudflare Named Tunnel 配置
-# 由 setup-cloudflare-tunnel.sh 自动生成，请勿手改 tunnel/credentials-file
+# HTTP bridge + optional public SSH for 125 and 110
+# 公网 SSH: scripts/setup-ssh-125-access.sh / setup-ssh-110-access.sh
 
 tunnel: REPLACE_TUNNEL_ID
 credentials-file: REPLACE_CREDENTIALS_FILE
@@ -7,4 +8,8 @@ credentials-file: REPLACE_CREDENTIALS_FILE
 ingress:
   - hostname: REPLACE_HOSTNAME
     service: http://127.0.0.1:8787
+  - hostname: REPLACE_SSH_HOSTNAME
+    service: ssh://127.0.0.1:22
+  - hostname: REPLACE_SSH110_HOSTNAME
+    service: ssh://10.229.20.110:22
   - service: http_status:404
